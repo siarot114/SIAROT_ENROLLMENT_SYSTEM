@@ -1,4 +1,3 @@
-
 package com.scc.dao;
 
 import java.sql.Connection;
@@ -10,30 +9,19 @@ public class DatabaseConnection {
 
     private static final String URL = "jdbc:sqlite:enrollment.db";
 
+    /**
+     * Opens a new connection and enables SQLite foreign key enforcement.
+     * SQLite disables foreign keys by default and the setting is per-connection,
+     * so the PRAGMA must run on every connection that is created.
+     */
     public static Connection getConnection() throws SQLException {
-        return DriverManager.getConnection(URL);
-    }
-
-    public static void initializeDatabase() {
-        String sql = """
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT NOT NULL UNIQUE,
-                    password TEXT NOT NULL,
-                    roles TEXT NOT NULL
-                        CHECK (roles IN ('TEACHER', 'STUDENT')),
-                    status TEXT NOT NULL DEFAULT 'PENDING'
-                )
-                """;
-
-        try (Connection connection = getConnection();
-             Statement statement = connection.createStatement()) {
-
-            statement.execute(sql);
-            System.out.println("SQLite database connected successfully.");
-
+        Connection connection = DriverManager.getConnection(URL);
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("PRAGMA foreign_keys = ON;");
         } catch (SQLException e) {
-            System.out.println("Database error: " + e.getMessage());
+            connection.close();
+            throw e;
         }
+        return connection;
     }
 }
