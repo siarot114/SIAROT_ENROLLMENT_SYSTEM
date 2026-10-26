@@ -1,6 +1,7 @@
 package com.scc.dao;
 
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 
@@ -14,7 +15,7 @@ public class DatabaseInitializer {
                 password_hash TEXT NOT NULL,
                 full_name     TEXT,
                 role          TEXT NOT NULL
-                              CHECK (role IN ('Admin', 'Registrar', 'Student')),
+                              CHECK (UPPER(role) IN ('ADMIN', 'REGISTRAR', 'STUDENT')),
                 status        TEXT NOT NULL DEFAULT 'PENDING',
                 date_created  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -87,6 +88,7 @@ public class DatabaseInitializer {
 
             // Parent tables first, then the tables that reference them.
             statement.execute(USERS);
+            migrateUsersRoleCheck(connection);
             statement.execute(STUDENTS);
             statement.execute(COURSES);
             statement.execute(ENROLLMENTS);
@@ -98,6 +100,52 @@ public class DatabaseInitializer {
         } catch (SQLException e) {
             System.err.println("Database initialization failed: " + e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Older databases were created with a case-sensitive role CHECK ('Admin', ...),
+     * which rejects the upper-case roles written by
+     * UserDao.updateUserRoleAndStatus.
+     * SQLite cannot alter a CHECK constraint, so the users table is rebuilt once
+     * (SQLite's documented "create new, copy, drop old, rename" procedure).
+     */
+    private static void migrateUsersRoleCheck(Connection connection) throws SQLException {
+        String currentSql = null;
+        try (Statement statement = connection.createStatement();
+             ResultSet result = statement.executeQuery(
+                     "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'")) {
+            if (result.next()) {
+                currentSql = result.getString(1);
+            }
+        }
+
+        if (currentSql == null || currentSql.toUpperCase().contains("UPPER(ROLE)")) {
+            return; // nothing to migrate
+        }
+
+        String newTable = USERS.replace("CREATE TABLE IF NOT EXISTS users", "CREATE TABLE users_new");
+
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("PRAGMA foreign_keys = OFF"); // must be set outside a transaction
+            connection.setAutoCommit(false);
+            try {
+                statement.execute("DROP TABLE IF EXISTS users_new");
+                statement.execute(newTable);
+                statement.execute("""
+                        INSERT INTO users_new (user_id, username, password_hash, full_name, role, status, date_created)
+                        SELECT user_id, username, password_hash, full_name, role, status, date_created FROM users
+                        """);
+                statement.execute("DROP TABLE users");
+                statement.execute("ALTER TABLE users_new RENAME TO users");
+                connection.commit();
+            } catch (SQLException e) {
+                connection.rollback();
+                throw e;
+            } finally {
+                connection.setAutoCommit(true);
+                statement.execute("PRAGMA foreign_keys = ON");
+            }
         }
     }
 }
