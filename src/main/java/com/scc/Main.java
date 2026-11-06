@@ -1,6 +1,10 @@
 package com.scc;
 
+import com.scc.dao.ActivityLogDao;
+import com.scc.dao.CourseDao;
 import com.scc.dao.DatabaseInitializer;
+import com.scc.dao.EnrollmentDao;
+import com.scc.dao.StudentDao;
 import com.scc.dao.UserDao;
 import com.scc.ui.Authentication;
 import com.scc.util.PasswordUtil;
@@ -18,12 +22,17 @@ public class Main {
         }
 
         // 2. Instantiate DAOs & utilities (one shared instance of each)
-        UserDao userDao = new UserDao();
+        ActivityLogDao activityLogDao = new ActivityLogDao();
+        UserDao userDao = new UserDao(activityLogDao);
+        StudentDao studentDao = new StudentDao(activityLogDao);
+        CourseDao courseDao = new CourseDao(activityLogDao);
+        EnrollmentDao enrollmentDao = new EnrollmentDao(activityLogDao);
         PasswordUtil passwordUtil = new PasswordUtil();
 
         // 3. Delegate to Authentication
         try (Scanner scanner = new Scanner(System.in)) {
-            Authentication authentication = new Authentication(userDao, passwordUtil, scanner);
+            Authentication authentication = new Authentication(userDao, activityLogDao, studentDao, courseDao,
+                    enrollmentDao, passwordUtil, scanner);
             authentication.start();
         }
     }

@@ -71,14 +71,12 @@ public class DatabaseInitializer {
 
     private static final String ACTIVITY_LOGS = """
             CREATE TABLE IF NOT EXISTS activity_logs (
-                log_id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id        INTEGER,
-                action         TEXT,
-                table_affected TEXT,
-                record_id      INTEGER,
-                description    TEXT,
-                log_datetime   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users (user_id)
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL,
+                action_type TEXT NOT NULL,
+                description TEXT NOT NULL,
+                timestamp   TIMESTAMP DEFAULT (datetime('now', 'localtime')),
+                FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
             )
             """;
 
@@ -92,6 +90,7 @@ public class DatabaseInitializer {
             statement.execute(STUDENTS);
             statement.execute(COURSES);
             statement.execute(ENROLLMENTS);
+            migrateLegacyActivityLogs(connection);
             statement.execute(ACTIVITY_LOGS);
 
             System.out.println("Database initialized successfully.");
@@ -100,6 +99,49 @@ public class DatabaseInitializer {
         } catch (SQLException e) {
             System.err.println("Database initialization failed: " + e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Earlier versions created activity_logs with different columns
+     * (log_id, action, table_affected, record_id, log_datetime). CREATE TABLE IF NOT EXISTS
+     * would silently keep that old table, so it is detected here and replaced.
+     * An empty legacy table is dropped; one that holds rows is renamed to
+     * activity_logs_legacy so no history is lost.
+     */
+    private static void migrateLegacyActivityLogs(Connection connection) throws SQLException {
+        boolean exists = false;
+        boolean current = false;
+
+        try (Statement statement = connection.createStatement();
+             ResultSet columns = statement.executeQuery("PRAGMA table_info(activity_logs)")) {
+            while (columns.next()) {
+                exists = true;
+                if ("action_type".equalsIgnoreCase(columns.getString("name"))) {
+                    current = true;
+                }
+            }
+        }
+
+        if (!exists || current) {
+            return;
+        }
+
+        int rows = 0;
+        try (Statement statement = connection.createStatement();
+             ResultSet count = statement.executeQuery("SELECT COUNT(*) FROM activity_logs")) {
+            if (count.next()) {
+                rows = count.getInt(1);
+            }
+        }
+
+        try (Statement statement = connection.createStatement()) {
+            if (rows == 0) {
+                statement.execute("DROP TABLE activity_logs");
+            } else {
+                statement.execute("DROP TABLE IF EXISTS activity_logs_legacy");
+                statement.execute("ALTER TABLE activity_logs RENAME TO activity_logs_legacy");
+            }
         }
     }
 

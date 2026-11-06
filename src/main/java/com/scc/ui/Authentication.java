@@ -1,5 +1,9 @@
 package com.scc.ui;
 
+import com.scc.dao.ActivityLogDao;
+import com.scc.dao.CourseDao;
+import com.scc.dao.EnrollmentDao;
+import com.scc.dao.StudentDao;
 import com.scc.dao.UserDao;
 import com.scc.model.Role;
 import com.scc.model.User;
@@ -11,6 +15,7 @@ import java.util.Scanner;
 public class Authentication {
 
     private final UserDao userDao;
+    private final ActivityLogDao activityLogDao;
     private final PasswordUtil passwordUtil;
     private final Scanner scanner;
 
@@ -18,14 +23,17 @@ public class Authentication {
     private final RegistrarMenu registrarMenu;
     private final StudentMenu studentMenu;
 
-    public Authentication(UserDao userDao, PasswordUtil passwordUtil, Scanner scanner) {
+    public Authentication(UserDao userDao, ActivityLogDao activityLogDao, StudentDao studentDao,
+                          CourseDao courseDao, EnrollmentDao enrollmentDao,
+                          PasswordUtil passwordUtil, Scanner scanner) {
         this.userDao = userDao;
+        this.activityLogDao = activityLogDao;
         this.passwordUtil = passwordUtil;
         this.scanner = scanner;
 
-        // The same UserDao and Scanner are passed to every menu.
-        this.adminMenu = new AdminMenu(userDao, scanner);
-        this.registrarMenu = new RegistrarMenu(userDao, scanner);
+        // The same DAOs and Scanner are passed to every menu.
+        this.adminMenu = new AdminMenu(userDao, activityLogDao, scanner);
+        this.registrarMenu = new RegistrarMenu(studentDao, courseDao, enrollmentDao, scanner);
         this.studentMenu = new StudentMenu(userDao, scanner);
     }
 
@@ -125,7 +133,19 @@ public class Authentication {
         }
 
         System.out.println("\nLogin successful!");
-        return routeToMenu(user);
+        activityLogDao.logAction(user.userId(), "USER_LOGIN",
+                "User " + user.username() + " (ID: " + user.userId() + ") logged in.");
+
+        boolean exitApp = routeToMenu(user);
+        logout(user, exitApp);
+        return exitApp;
+    }
+
+    /** Records USER_LOGOUT when a menu returns, whether by Logout or by Exit Application. */
+    private void logout(User user, boolean exitingApplication) {
+        activityLogDao.logAction(user.userId(), "USER_LOGOUT",
+                "User " + user.username() + " (ID: " + user.userId() + ") logged out"
+                        + (exitingApplication ? " (application closed)." : "."));
     }
 
     private boolean routeToMenu(User user) {

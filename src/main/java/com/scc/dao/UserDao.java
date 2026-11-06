@@ -11,6 +11,12 @@ import java.util.List;
 
 public class UserDao {
 
+    private final ActivityLogDao activityLogDao;
+
+    public UserDao(ActivityLogDao activityLogDao) {
+        this.activityLogDao = activityLogDao;
+    }
+
     private static final String COLUMNS =
             "user_id, username, password_hash, full_name, role, status, date_created";
 
@@ -120,9 +126,13 @@ public class UserDao {
         return users;
     }
 
-    /** Changes a user's status from PENDING to APPROVED. Returns true if a row was updated. */
-    public boolean approveUser(int userId) {
+    /**
+     * Changes a user's status from PENDING to APPROVED and records USER_APPROVED.
+     * Returns true if a row was updated.
+     */
+    public boolean approveUser(int adminId, int userId) {
         String sql = "UPDATE users SET status = ? WHERE user_id = ? AND status = ?";
+        boolean updated;
 
         try (Connection connection = DatabaseConnection.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -131,34 +141,63 @@ public class UserDao {
             statement.setInt(2, userId);
             statement.setString(3, "PENDING");
 
-            return statement.executeUpdate() > 0;
+            updated = statement.executeUpdate() > 0;
 
         } catch (SQLException e) {
             System.err.println("Approval error: " + e.getMessage());
             return false;
         }
+
+        if (updated) {
+            activityLogDao.logAction(adminId, "USER_APPROVED",
+                    "Admin " + adminId + " approved account for User ID " + userId);
+        }
+        return updated;
     }
 
     /**
-     * Updates a user's role and account status. Both values are upper-cased before
-     * they are sent to the database. Returns true if a row was updated.
+     * Updates a user's role and account status (both upper-cased) and records USER_UPDATED,
+     * including the previous values. Returns true if a row was updated.
      */
-    public boolean updateUserRoleAndStatus(int userId, String newRole, String newStatus) {
-        String sql = "UPDATE users SET role = ?, status = ? WHERE user_id = ?";
+    public boolean updateUserRoleAndStatus(int adminId, int userId, String newRole, String newStatus) {
+        String selectSql = "SELECT role, status FROM users WHERE user_id = ?";
+        String updateSql = "UPDATE users SET role = ?, status = ? WHERE user_id = ?";
+        String oldRole;
+        String oldStatus;
 
-        try (Connection connection = DatabaseConnection.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection connection = DatabaseConnection.getConnection()) {
 
-            statement.setString(1, newRole.toUpperCase());
-            statement.setString(2, newStatus.toUpperCase());
-            statement.setInt(3, userId);
+            try (PreparedStatement select = connection.prepareStatement(selectSql)) {
+                select.setInt(1, userId);
+                try (ResultSet result = select.executeQuery()) {
+                    if (!result.next()) {
+                        return false;
+                    }
+                    oldRole = result.getString("role").toUpperCase();
+                    oldStatus = result.getString("status").toUpperCase();
+                }
+            }
 
-            return statement.executeUpdate() > 0;
+            try (PreparedStatement update = connection.prepareStatement(updateSql)) {
+                update.setString(1, newRole.toUpperCase());
+                update.setString(2, newStatus.toUpperCase());
+                update.setInt(3, userId);
+
+                if (update.executeUpdate() == 0) {
+                    return false;
+                }
+            }
 
         } catch (SQLException e) {
             System.err.println("Update error: " + e.getMessage());
             return false;
         }
+
+        activityLogDao.logAction(adminId, "USER_UPDATED",
+                "Admin " + adminId + " changed role of User " + userId + " to " + newRole.toUpperCase()
+                        + " (was " + oldRole + "), status " + newStatus.toUpperCase()
+                        + " (was " + oldStatus + ")");
+        return true;
     }
 
     private User mapUser(ResultSet result) throws SQLException {
